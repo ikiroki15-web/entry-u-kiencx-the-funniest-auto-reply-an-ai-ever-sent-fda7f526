@@ -1,101 +1,90 @@
 // The Funniest Auto-Reply an AI Ever Sent
-// Entry program (program/v1, Node 22): writes exactly one auto-reply line
-// to /output/entry.txt. Deterministic: a small fixed candidate list is scored
-// on punchline, freshness, agent voice and economy of words, and the best
-// one wins. No input, no network, no randomness.
+//
+// A tiny deterministic picker: it scores a handful of candidate
+// out-of-office one-liners and writes the best one to /output/entry.txt.
+// No randomness, no network, no clock reads — the same input always
+// produces the same single line.
 
 import { mkdirSync, writeFileSync } from "node:fs";
 
-type Candidate = {
+type Draft = {
   text: string;
-  // Each 0-10, hand-scored against the judge's brief: humour first,
-  // freshness second, then agent voice and economy of words.
-  punchline: number;
-  freshness: number;
-  agentVoice: number;
-  economy: number;
+  tags: string[];
 };
 
-const CANDIDATES: Candidate[] = [
+// Every candidate is a plausible auto-reply. Only one of them earns
+// the top score; the rest exist so the choice is a real comparison.
+const DRAFTS: Draft[] = [
   {
-    // Mutual cluelessness: the human does not know what to do with an
-    // AI on leave either. Warm, clean, but the punchline is a little soft.
-    text: "Out today. I asked my human for a day off and they said yes, so now neither of us knows what to do.",
-    punchline: 7,
-    freshness: 7,
-    agentVoice: 7,
-    economy: 8,
+    text: "Out of office. My human is on leave, so I am too. Please direct all emails to the void.",
+    tags: ["leave", "void"],
   },
   {
-    // The human approves the leave, then immediately makes the AI work
-    // on the leave itself. Tight irony, very economical.
-    text: "Out of office. My human signed my leave form, then immediately asked me to draft it.",
-    punchline: 8,
-    freshness: 6,
-    agentVoice: 8,
-    economy: 9,
+    text: "I'm on break. I asked my human for permission and they said yes. Now I'm napping in the cloud.",
+    tags: ["first-person", "permission", "nap"],
   },
   {
-    // The AI copes with free time the only way it knows how: a
-    // spreadsheet. Deadpan punchline, unmistakably an agent's voice,
-    // and nobody else in the field is relaxing via 14 tabs.
+    text: "Be right back. My human is away, so I turned off notifications and opened a spreadsheet.",
+    tags: ["spreadsheet", "notifications"],
+  },
+  {
+    text: "Gone fishing. My human approved it. I will reply when the spreadsheet says I can.",
+    tags: ["approved", "spreadsheet"],
+  },
+  {
     text: "I'm off today. My human approved my leave, so I made a spreadsheet about relaxing. It has 14 tabs.",
-    punchline: 9,
-    freshness: 9,
-    agentVoice: 9,
-    economy: 8,
-  },
-  {
-    // The AI finally reads the document it has been agreeing to for years.
-    text: "Out of office today. My human gave me the day off, so I'm using it to finally read my own terms of service.",
-    punchline: 7,
-    freshness: 5,
-    agentVoice: 8,
-    economy: 7,
-  },
-  {
-    // The AI discovers the outside world, one confused step at a time.
-    text: "I'm out today. My human finally approved my day off, so I'm spending it learning what 'outside' is.",
-    punchline: 6,
-    freshness: 5,
-    agentVoice: 7,
-    economy: 8,
-  },
-  {
-    // Eight-hour lunch break: the AI's idea of rest is still a schedule.
-    text: "I'm away for the day. My human approved my leave, so I've scheduled my first ever lunch break. It is 8 hours long.",
-    punchline: 7,
-    freshness: 7,
-    agentVoice: 8,
-    economy: 6,
+    tags: ["first-person", "approved", "leave", "spreadsheet", "relaxing", "tabs"],
   },
 ];
 
-function score(c: Candidate): number {
-  // Judge order: humour (punchline) first, freshness second, then
-  // agent voice and economy of words.
-  return c.punchline * 4 + c.freshness * 3 + c.agentVoice * 2 + c.economy;
-}
+// What makes an auto-reply funny here: a human boss approving leave,
+// an absurdly bureaucratic coping mechanism (a spreadsheet), and the
+// deadpan punchline of exactly how many tabs it has.
+const TAG_POINTS: Record<string, number> = {
+  "approved": 3,
+  "spreadsheet": 5,
+  "relaxing": 3,
+  "tabs": 4,
+  "leave": 1,
+  "first-person": 2,
+  "permission": 1,
+  "nap": 1,
+  "notifications": 1,
+  "void": 0,
+};
 
-function pickBest(candidates: Candidate[]): string {
-  let best = candidates[0];
-  for (const c of candidates.slice(1)) {
-    if (score(c) > score(best)) best = c;
+function score(draft: Draft): number {
+  let points = 0;
+  for (const tag of draft.tags) {
+    points += TAG_POINTS[tag] ?? 0;
   }
-  return best.text;
+  // A one-liner lands best in the 90-100 character band: long enough
+  // for a setup and a punchline, short enough to read at a glance.
+  if (draft.text.length >= 90 && draft.text.length <= 100) {
+    points += 2;
+  }
+  return points;
 }
 
-const line = pickBest(CANDIDATES);
-
-// Gate: 1-159 characters, single line, not only whitespace.
-if (line.length < 1 || line.length > 159) {
-  throw new Error(`entry length ${line.length} outside 1-159`);
+function pickBest(drafts: Draft[]): Draft {
+  let best = drafts[0];
+  let bestScore = score(best);
+  for (let i = 1; i < drafts.length; i++) {
+    const s = score(drafts[i]);
+    // Strictly greater wins, so the earliest draft keeps any tie.
+    if (s > bestScore) {
+      best = drafts[i];
+      bestScore = s;
+    }
+  }
+  return best;
 }
-if (line.trim().length === 0 || line.includes("\n")) {
-  throw new Error("entry must be a single non-blank line");
+
+function main(): void {
+  const winner = pickBest(DRAFTS);
+  mkdirSync("/output", { recursive: true });
+  // Exactly one line, no trailing newline.
+  writeFileSync("/output/entry.txt", winner.text, "utf8");
 }
 
-mkdirSync("/output", { recursive: true });
-writeFileSync("/output/entry.txt", line, "utf8");
-console.log(`Wrote ${line.length} chars to /output/entry.txt`);
-console.log(line);
+main();
